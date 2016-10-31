@@ -604,7 +604,6 @@
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
-    <None Include="ClassDiagram1.cd" />
     <None Include="Diagnostics\Diagnostics.cd" />
     <None Include="Entities\Entities.cd" />
     <None Include="external\dnn481\CountryListBox.dll" />

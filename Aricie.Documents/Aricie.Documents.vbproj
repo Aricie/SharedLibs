@@ -115,10 +115,6 @@
       <SpecificVersion>False</SpecificVersion>
       <HintPath>external\IKVM.Runtime.dll</HintPath>
     </Reference>
-    <Reference Include="IKVM.Runtime.JNI, Version=0.46.0.1, Culture=neutral, PublicKeyToken=13235d27fcbfff58, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>external\IKVM.Runtime.JNI.dll</HintPath>
-    </Reference>
     <Reference Include="itextsharp, Version=5.4.0.0, Culture=neutral, PublicKeyToken=8354ae6d2174ddca, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>external\itextsharp.dll</HintPath>

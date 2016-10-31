@@ -9,28 +9,36 @@ Namespace Services.OpenXML
 
     Public Class xlsxController
 
-        'TODO: Initialize automatically _columnsList from the DataSource
-        Public DataSource As DataTable = Nothing
+        Public Source As List(Of DataSource) = New List(Of DataSource)
+
         Public SpecialHeaderFormat As CellFormat = Nothing
         Public HeaderHeight As Decimal = 0
 
-        Private Shared _columnsList As List(Of xlsxColumnInfo) = Nothing
 
         ''' <summary>
         ''' Initializes the datasource for the future export in a xlsx file
         ''' </summary>
-        ''' <param name="columnsList"></param>
         ''' <remarks></remarks>
-        Public Sub InitializeDataSource(ByVal columnsList As List(Of xlsxColumnInfo))
+        Public Sub InitializeDataSource()
 
-            _columnsList = columnsList
-            DataSource = New DataTable
+            'On a une datatable
+            If Source.Count > 0 Then
 
-            For Each column As xlsxColumnInfo In columnsList
-                DataSource.Columns.Add(New DataColumn(column.Name, column.Format))
-            Next
+                For Each datasource As DataSource In Source
+
+                    If datasource.ColumnList Is Nothing Then
+                        datasource.ColumnList = New List(Of xlsxColumnInfo)
+
+                        For Each column As DataColumn In datasource.Datas.Columns
+                            ' On créé la liste de colonnes
+                            datasource.ColumnList.Add(New xlsxColumnInfo With {.Name = column.ColumnName, .FriendlyName = column.ColumnName, .Format = column.DataType})
+                        Next
+                    End If
+                Next
+            End If
 
         End Sub
+
 
         ''' <summary>
         ''' Generates the xlsx file from the datasource and save it to the specified file path
@@ -43,42 +51,64 @@ Namespace Services.OpenXML
             Dim excelFile As SpreadsheetDocument = SpreadsheetDocument.Create(fullFilePath, SpreadsheetDocumentType.Workbook)
             Dim objWorkbookPart As WorkbookPart = excelFile.AddWorkbookPart()
 
+            objWorkbookPart.Workbook = New Workbook()
+
             Dim sp As WorkbookStylesPart = objWorkbookPart.AddNewPart(Of WorkbookStylesPart)()
             sp.Stylesheet = createStylesheet()
 
-            Dim objWorksheetPart As WorksheetPart = objWorkbookPart.AddNewPart(Of WorksheetPart)()
-            'objWorksheetPart.Worksheet = New Worksheet(New SheetData())
-            Dim ws As Worksheet = New Worksheet()
-            formatColumns(ws)
-            ws.Append(New SheetData())
-            objWorksheetPart.Worksheet = ws
-
-            objWorkbookPart.Workbook = New Workbook()
             Dim objSheets As Sheets = excelFile.WorkbookPart.Workbook.AppendChild(Of Sheets)(New Sheets())
-            Dim excelSheet As Sheet = New Sheet() With {.Id = excelFile.WorkbookPart.GetIdOfPart(objWorksheetPart), .SheetId = 1, .Name = "Extraction"}
-            objSheets.Append(excelSheet)
 
-            Dim objSheetData As SheetData = objWorksheetPart.Worksheet.GetFirstChild(Of SheetData)()
-            addHeaders(objSheetData)
-            addRows(objSheetData)
+            Dim objWorksheetPart As WorksheetPart = Nothing
 
-            '' Sauvegarde et fermeture du fichier
-            'workbookpart.Workbook.Save();
+            Dim idSheet As Integer = 1
+
+            For Each datasource As DataSource In Source
+
+                ' On récupère la feuille sur laquelle on veut inscrire les données
+                Dim excelSheet As Sheet = GetSheetFromName(objWorkbookPart, datasource.SheetName)
+
+                If excelSheet Is Nothing Then
+                    'La feuille n'existe pas : on la créée
+                    objWorksheetPart = objWorkbookPart.AddNewPart(Of WorksheetPart)()
+
+                    Dim ws As Worksheet = New Worksheet()
+                    formatColumns(ws, datasource)
+                    ws.Append(New SheetData())
+
+                    objWorksheetPart.Worksheet = ws
+
+                    excelSheet = New Sheet() With {.Id = excelFile.WorkbookPart.GetIdOfPart(objWorksheetPart), .SheetId = CType(idSheet, UInt32Value), .Name = datasource.SheetName}
+                    objSheets.Append(excelSheet)
+                    idSheet += 1
+                End If
+
+                ' Current sheet data
+                Dim objSheetData As SheetData = objWorksheetPart.Worksheet.GetFirstChild(Of SheetData)()
+
+                ' Permet de continuer à écrire sur une feuille déjà utilisée (récupération de la dernière ligne)
+                Dim row As IEnumerable(Of Row) = objSheetData.Elements(Of Row)()
+                If row IsNot Nothing Then
+                    Dim posHeader = row.Count + 1
+                    addHeaders(objSheetData, datasource, posHeader)
+                    addRows(objSheetData, datasource, posHeader + 1)
+                Else
+                    addHeaders(objSheetData, datasource)
+                    addRows(objSheetData, datasource)
+                End If
+
+            Next
+
             excelFile.Close()
 
         End Sub
 
 
-        Private Shared Sub formatColumns(ByRef ws As Worksheet)
+        Private Shared Sub formatColumns(ByRef ws As Worksheet, datas As DataSource)
             Dim columns As New Columns()
-            For Each column As xlsxColumnInfo In _columnsList
-                'If column.Autosize Then
-                '    'TODO: Use the function to autosize the current column depending on its largest content
-                'Else
+            For Each column As xlsxColumnInfo In datas.ColumnList
                 If column.Width > 0 Then
-                    columns.Append(createColumnData(UInteger.Parse((_columnsList.IndexOf(column) + 1).ToString()), column.Width))
+                    columns.Append(createColumnData(UInteger.Parse((datas.ColumnList.IndexOf(column) + 1).ToString()), column.Width))
                 End If
-                'End If
             Next
             ws.Append(columns)
         End Sub
@@ -131,8 +161,21 @@ Namespace Services.OpenXML
 
         End Function
 
+        ''' <summary>
+        ''' Permet de spécifier une largeur à une colonne
+        ''' </summary>
+        Public Shared Sub formatHeader(dt As DataSource, headerName As String, width As Double)
+            If dt.ColumnList IsNot Nothing Then
+                For Each column In dt.ColumnList
+                    If column.Name = headerName Then
+                        column.Width = width
+                    End If
+                Next
+            End If
 
-        Private Sub addHeaders(ByRef objSheetData As SheetData)
+        End Sub
+
+        Private Sub addHeaders(ByRef objSheetData As SheetData, datasource As DataSource, Optional rowIndex As Integer = 1)
 
             Dim headersRow As New Row
 
@@ -141,12 +184,12 @@ Namespace Services.OpenXML
                 headersRow.CustomHeight = True
             End If
 
-            For Each column As xlsxColumnInfo In _columnsList
+            For Each column As xlsxColumnInfo In datasource.ColumnList
                 Dim newCell As Cell = Nothing
                 If SpecialHeaderFormat IsNot Nothing Then
-                    newCell = createTextCell(_columnsList.IndexOf(column), 1, column.FriendlyName, CellValues.String, 2)
+                    newCell = createTextCell(datasource.ColumnList.IndexOf(column), CUInt(rowIndex), column.FriendlyName, CellValues.String, 2)
                 Else
-                    newCell = createTextCell(_columnsList.IndexOf(column), 1, column.FriendlyName, CellValues.String)
+                    newCell = createTextCell(datasource.ColumnList.IndexOf(column), CUInt(rowIndex), column.FriendlyName, CellValues.String)
                 End If
                 headersRow.AppendChild(newCell)
             Next
@@ -156,23 +199,22 @@ Namespace Services.OpenXML
         End Sub
 
 
-        Private Sub addRows(ByRef objSheetData As SheetData)
+        Private Sub addRows(ByRef objSheetData As SheetData, datasource As DataSource, Optional rowIndex As Integer = 2)
 
             Dim r As Row = Nothing
-            Dim rowIndex As Integer = 2
 
-            For Each entry As DataRow In DataSource.Rows
+            For Each entry As DataRow In datasource.Datas.Rows
                 Dim rowToAdd As New Row
 
-                For Each column As xlsxColumnInfo In _columnsList
+                For Each column As xlsxColumnInfo In datasource.ColumnList
                     Dim newCell As Cell = Nothing
                     Select Case column.Format.Name
                         Case "Date"
-                            newCell = createTextCell(_columnsList.IndexOf(column), UInteger.Parse(rowIndex.ToString()), entry(column.Name), CellValues.Date)
+                            newCell = createTextCell(datasource.ColumnList.IndexOf(column), UInteger.Parse(rowIndex.ToString()), entry(column.Name), CellValues.Date)
                         Case "Int32", "Decimal"
-                            newCell = createTextCell(_columnsList.IndexOf(column), UInteger.Parse(rowIndex.ToString()), entry(column.Name), CellValues.Number)
+                            newCell = createTextCell(datasource.ColumnList.IndexOf(column), UInteger.Parse(rowIndex.ToString()), entry(column.Name), CellValues.Number)
                         Case Else
-                            newCell = createTextCell(_columnsList.IndexOf(column), UInteger.Parse(rowIndex.ToString()), entry(column.Name), CellValues.String)
+                            newCell = createTextCell(datasource.ColumnList.IndexOf(column), UInteger.Parse(rowIndex.ToString()), entry(column.Name), CellValues.String)
                     End Select
                     rowToAdd.AppendChild(newCell)
                 Next
@@ -180,6 +222,9 @@ Namespace Services.OpenXML
                 objSheetData.AppendChild(rowToAdd)
                 rowIndex += 1
             Next
+
+            Dim blankRow As New Row
+            objSheetData.AppendChild(blankRow)
 
         End Sub
 
@@ -192,23 +237,23 @@ Namespace Services.OpenXML
 
             Select Case dataType
                 Case CellValues.Date
-                    c = New Cell() With { _
-                         .DataType = CellValues.String, _
-                         .CellReference = header & rowIndex, _
-                         .StyleIndex = 1, _
-                         .CellValue = New CellValue(String.Format("{0:dd/MM/yyyy}", value)) _
+                    c = New Cell() With {
+                         .DataType = CellValues.String,
+                         .CellReference = header & rowIndex,
+                         .StyleIndex = 1,
+                         .CellValue = New CellValue(String.Format("{0:dd/MM/yyyy}", value))
                         }
                 Case CellValues.Number
-                    c = New Cell() With { _
-                     .DataType = dataType, _
-                     .CellReference = header & rowIndex, _
-                     .CellValue = New CellValue(value.ToString().Replace(",", ".")) _
+                    c = New Cell() With {
+                     .DataType = dataType,
+                     .CellReference = header & rowIndex,
+                     .CellValue = New CellValue(value.ToString().Replace(",", "."))
                     }
                 Case CellValues.String
-                    c = New Cell() With { _
-                     .DataType = dataType, _
-                     .CellReference = header & rowIndex, _
-                     .CellValue = New CellValue(value.ToString()) _
+                    c = New Cell() With {
+                     .DataType = dataType,
+                     .CellReference = header & rowIndex,
+                     .CellValue = New CellValue(value.ToString())
                     }
             End Select
 
@@ -340,61 +385,26 @@ Namespace Services.OpenXML
             Return ss
         End Function
 
-        Private Shared Function getCorrespondingColumnLetter(ByVal columnIndex As Integer) As String
-            Select Case columnIndex
-                Case 0
-                    Return "A"
-                Case 1
-                    Return "B"
-                Case 2
-                    Return "C"
-                Case 3
-                    Return "D"
-                Case 4
-                    Return "E"
-                Case 5
-                    Return "F"
-                Case 6
-                    Return "G"
-                Case 7
-                    Return "H"
-                Case 8
-                    Return "I"
-                Case 9
-                    Return "J"
-                Case 10
-                    Return "K"
-                Case 11
-                    Return "L"
-                Case 12
-                    Return "M"
-                Case 13
-                    Return "N"
-                Case 14
-                    Return "O"
-                Case 15
-                    Return "P"
-                Case 16
-                    Return "Q"
-                Case 17
-                    Return "R"
-                Case 18
-                    Return "S"
-                Case 19
-                    Return "T"
-                Case 20
-                    Return "U"
-                Case 21
-                    Return "V"
-                Case 22
-                    Return "W"
-                Case 23
-                    Return "X"
-                Case 24
-                    Return "Y"
-                Case Else
-                    Return "Z"
-            End Select
+        Public Shared Function GetSheetFromName(workbookPart As WorkbookPart, sheetName As String) As Sheet
+            Return workbookPart.Workbook.Sheets.Elements(Of Sheet)().FirstOrDefault(Function(s) s.Name.HasValue AndAlso s.Name.Value = sheetName)
+        End Function
+
+        ''' <summary>
+        ''' Retourne le nom de la colonne en fonction de l'index
+        ''' </summary>
+        ''' <returns></returns>
+        Private Shared Function getCorrespondingColumnLetter(columnNumber As Integer) As String
+            Dim dividend As Integer = columnNumber + 1
+            Dim columnName As String = String.Empty
+            Dim modulo As Integer
+
+            While dividend > 0
+                modulo = (dividend - 1) Mod 26
+                columnName = Convert.ToChar(65 + modulo).ToString() & columnName
+                dividend = CInt((dividend - modulo) / 26)
+            End While
+
+            Return columnName
         End Function
 
         Public Shared Function GetExcelColumns(ByVal dnnFile As DotNetNuke.Services.FileSystem.FileInfo) As IEnumerable(Of ExcelRowEntity)
@@ -550,6 +560,36 @@ Namespace Services.OpenXML
             Next
             Return toReturn
         End Function
+
+        Public Class DataSource
+
+            Property Datas As DataTable = Nothing
+
+            Property ColumnList As List(Of xlsxColumnInfo) = Nothing
+
+            Property SheetName As String = "Sheet"
+
+            Public Sub New()
+                Me.Datas = New DataTable
+            End Sub
+
+            Public Sub New(datas As DataTable)
+                Me.New(datas, Nothing, "Sheet")
+            End Sub
+
+            Public Sub New(datas As DataTable, columnList As List(Of xlsxColumnInfo))
+                Me.New(datas, columnList, "Sheet")
+            End Sub
+
+            Public Sub New(datas As DataTable, columnList As List(Of xlsxColumnInfo), SheetName As String)
+
+                Me.Datas = datas
+                Me.ColumnList = columnList
+                Me.SheetName = SheetName
+
+            End Sub
+
+        End Class
 
     End Class
 

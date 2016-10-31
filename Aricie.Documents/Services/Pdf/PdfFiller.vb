@@ -1,7 +1,7 @@
 Imports System.IO
 Imports iTextSharp.text.pdf
 
-Namespace Aricie.Pdf
+Namespace Services.Pdf
 
     Public Class PdfFiller
 
@@ -14,7 +14,7 @@ Namespace Aricie.Pdf
         ''' </summary>
         ''' <param name="PDF2Fill">Chemin vers le fichier pdf à remplir</param>
         Public Sub New(ByVal pdf2Fill As String)
-            _Pdf2Fill = Pdf2Fill
+            _Pdf2Fill = pdf2Fill
         End Sub
 
         Private _Fields As New Dictionary(Of String, String)
